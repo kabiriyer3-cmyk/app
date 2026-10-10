@@ -50,7 +50,7 @@ internal sealed class HttpServerHost : IAsyncDisposable
             }
         });
 
-        builder.Services.AddSingleton(new HttpSecurityContext(accessToken, options.HttpPort));
+        builder.Services.AddSingleton(new HttpSecurityContext(accessToken, options.HttpPort, options.AllowedHosts));
         builder.Services
             .AddLocalMcpServer(options, audit)
             .WithHttpTransport(transport =>
@@ -68,7 +68,8 @@ internal sealed class HttpServerHost : IAsyncDisposable
         await app.StartAsync();
         _app = app;
         Endpoint = $"http://127.0.0.1:{options.HttpPort}/mcp";
-        audit.Write("server", $"HTTP transport listening on {Endpoint}");
+        audit.Write("server", $"HTTP transport listening on {Endpoint}"
+            + (options.AllowedHosts.Count > 0 ? $"; tunnel hosts allowed: {string.Join(", ", options.AllowedHosts)}" : ""));
     }
 
     public async Task StopAsync()

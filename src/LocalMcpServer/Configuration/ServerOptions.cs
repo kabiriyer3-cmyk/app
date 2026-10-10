@@ -26,6 +26,13 @@ public sealed class ServerOptions
 
     public int HttpPort { get; set; } = 39217;
 
+    /// <summary>
+    /// Extra Host header values accepted by the HTTP transport, for exposing the server through a tunnel
+    /// (cloudflared, localhost.run, Tuna...). Exact names or a leading wildcard such as "*.lhr.life".
+    /// Requests must still come from a loopback peer (the local tunnel client) and carry the bearer token.
+    /// </summary>
+    public List<string> AllowedHosts { get; set; } = [];
+
     /// <summary>delete_path is disabled unless explicitly enabled. Deletions go to the Recycle Bin.</summary>
     public bool AllowDelete { get; set; }
 

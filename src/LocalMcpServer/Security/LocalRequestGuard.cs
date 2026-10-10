@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Http;
 
 namespace LocalMcpServer.Security;
 
-public sealed record HttpSecurityContext(string AccessToken, int Port);
+public sealed record HttpSecurityContext(string AccessToken, int Port, IReadOnlyList<string> AllowedHosts);
 
 /// <summary>
 /// Hardening for the HTTP transport, following the MCP Streamable HTTP security guidance:
@@ -79,10 +79,39 @@ public sealed class LocalRequestGuard(RequestDelegate next, HttpSecurityContext 
         }
     }
 
-    private bool IsAllowedHost(HostString host) =>
-        host.HasValue
-        && LoopbackHosts.Contains(host.Host)
-        && (host.Port is null || host.Port == security.Port);
+    private bool IsAllowedHost(HostString host)
+    {
+        if (!host.HasValue)
+        {
+            return false;
+        }
+
+        if (LoopbackHosts.Contains(host.Host))
+        {
+            return host.Port is null || host.Port == security.Port;
+        }
+
+        // Tunnel hostnames are only accepted when explicitly configured.
+        return security.AllowedHosts.Any(pattern => MatchesHostPattern(host.Host, pattern));
+    }
+
+    internal static bool MatchesHostPattern(string host, string pattern)
+    {
+        pattern = pattern.Trim().TrimEnd('.');
+        host = host.Trim().TrimEnd('.');
+        if (pattern.Length == 0 || pattern == "*")
+        {
+            return false; // A bare wildcard would disable the DNS-rebinding defence entirely.
+        }
+
+        if (pattern.StartsWith("*.", StringComparison.Ordinal))
+        {
+            var suffix = pattern[1..]; // ".lhr.life"
+            return host.Length > suffix.Length && host.EndsWith(suffix, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return host.Equals(pattern, StringComparison.OrdinalIgnoreCase);
+    }
 
     private static bool IsAllowedOrigin(string origin) =>
         Uri.TryCreate(origin, UriKind.Absolute, out var uri)

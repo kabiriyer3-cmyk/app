@@ -7,6 +7,8 @@
   ],
   "enableHttp": true,
   "httpPort": 39217,
+  // Public tunnel hostnames allowed in the Host header, e.g. "*.lhr.life", "*.trycloudflare.com". Empty = local only.
+  "allowedHosts": [],
   "allowDelete": false,
   "refuseElevated": true,
   "includeMachineIdentifiers": false,
