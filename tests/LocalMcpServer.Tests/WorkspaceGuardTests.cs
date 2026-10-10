@@ -111,4 +111,18 @@ public sealed class WorkspaceGuardTests
             Directory.Delete(outside, recursive: true);
         }
     }
+
+    [Theory]
+    [InlineData("abc123.lhr.life", "*.lhr.life", true)]
+    [InlineData("ABC.LHR.LIFE", "*.lhr.life", true)]
+    [InlineData("lhr.life", "*.lhr.life", false)]
+    [InlineData("evil-lhr.life", "*.lhr.life", false)]
+    [InlineData("lhr.life.evil.com", "*.lhr.life", false)]
+    [InlineData("my.example.com", "my.example.com", true)]
+    [InlineData("other.example.com", "my.example.com", false)]
+    [InlineData("anything.com", "*", false)]
+    public void Tunnel_host_patterns_match_strictly(string host, string pattern, bool expected)
+    {
+        Assert.Equal(expected, LocalRequestGuard.MatchesHostPattern(host, pattern));
+    }
 }

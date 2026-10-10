@@ -15,6 +15,7 @@ internal sealed class MainForm : Form
     private readonly CheckBox _enableHttp = new() { Text = "Enable HTTP transport (127.0.0.1 only, token required)", AutoSize = true };
     private readonly CheckBox _allowDelete = new() { Text = "Allow delete (Recycle Bin)", AutoSize = true };
     private readonly NumericUpDown _port = new() { Minimum = 1024, Maximum = 65535, Width = 80 };
+    private readonly TextBox _allowedHosts = new() { Width = 320, PlaceholderText = "*.lhr.life, *.trycloudflare.com" };
     private readonly TextBox _log = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = false, Dock = DockStyle.Fill };
     private ServerOptions _draft;
     private bool _forceClose;
@@ -54,6 +55,8 @@ internal sealed class MainForm : Form
         settings.Controls.Add(new Label { Text = "Port:", AutoSize = true, Padding = new Padding(12, 6, 0, 0) });
         settings.Controls.Add(_port);
         settings.Controls.Add(_allowDelete);
+        settings.Controls.Add(new Label { Text = "Tunnel hosts:", AutoSize = true, Padding = new Padding(12, 6, 0, 0) });
+        settings.Controls.Add(_allowedHosts);
 
         var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true };
         actions.Controls.Add(MakeButton("Save && restart", async (_, _) => await SaveAsync()));
@@ -122,6 +125,7 @@ internal sealed class MainForm : Form
         _enableHttp.Checked = _draft.EnableHttp;
         _allowDelete.Checked = _draft.AllowDelete;
         _port.Value = Math.Clamp(_draft.HttpPort, (int)_port.Minimum, (int)_port.Maximum);
+        _allowedHosts.Text = string.Join(", ", _draft.AllowedHosts);
         RefreshWorkspaces();
     }
 
@@ -242,6 +246,11 @@ internal sealed class MainForm : Form
         _draft.EnableHttp = _enableHttp.Checked;
         _draft.AllowDelete = _allowDelete.Checked;
         _draft.HttpPort = (int)_port.Value;
+        _draft.AllowedHosts = _allowedHosts.Text
+            .Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(h => h != "*")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
         await _host.ApplySettingsAsync(SettingsStore.Clone(_draft));
     }
 
