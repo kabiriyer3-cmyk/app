@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using ModelContextProtocol.AspNetCore;
 
 namespace LocalMcpServer.Hosting;
 
@@ -52,7 +53,12 @@ internal sealed class HttpServerHost : IAsyncDisposable
         builder.Services.AddSingleton(new HttpSecurityContext(accessToken, options.HttpPort));
         builder.Services
             .AddLocalMcpServer(options, audit)
-            .WithHttpTransport();
+            .WithHttpTransport(transport =>
+            {
+                // Hybrid mode: clients still using the initialize handshake (2025-xx revisions) get a real session
+                // with Mcp-Session-Id and the GET stream; 2026-07-28+ clients are served statelessly.
+                transport.SessionMode = HttpServerSessionMode.StatefulForInitializeClients;
+            });
 
         var app = builder.Build();
         app.UseMiddleware<LocalRequestGuard>();
