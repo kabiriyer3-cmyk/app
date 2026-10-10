@@ -1,0 +1,23 @@
+{
+  // Seed configuration. On first run this is copied to %APPDATA%\LocalMcpServer\settings.json,
+  // which is the file the app actually reads and the dashboard edits.
+  "workspaces": [
+    // { "name": "my-mod", "path": "D:\\Modding\\MyMod", "access": "ReadWrite" },
+    // { "name": "game-content", "path": "D:\\SteamLibrary\\steamapps\\common\\Ready Or Not\\ReadyOrNot\\Content\\Paks", "access": "ReadOnly" }
+  ],
+  "enableHttp": true,
+  "httpPort": 39217,
+  "allowDelete": false,
+  "refuseElevated": true,
+  "includeMachineIdentifiers": false,
+  "maxReadBytes": 16777216,
+  "maxWriteBytes": 16777216,
+  "maxCopyBytes": 4294967296,
+  "maxListEntries": 5000,
+  "maxSearchResults": 500,
+  "blockedWriteExtensions": [
+    ".exe", ".dll", ".sys", ".drv", ".com", ".scr", ".msi", ".msix", ".appx",
+    ".bat", ".cmd", ".ps1", ".psm1", ".vbs", ".vbe", ".jse", ".wsf", ".wsh",
+    ".hta", ".lnk", ".url", ".reg", ".cpl", ".inf"
+  ]
+}

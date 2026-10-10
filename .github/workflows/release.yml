@@ -1,0 +1,193 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"          # v1.2.3, v1.2.3-beta.1
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "true"
+  PROJECT: src/LocalMcpServer/LocalMcpServer.csproj
+  SOLUTION: LocalMcpServer.slnx
+
+jobs:
+  test:
+    name: Build & test
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore ${{ env.SOLUTION }}
+
+      - name: Test
+        run: >
+          dotnet test ${{ env.SOLUTION }}
+          --configuration Release
+          --no-restore
+          --logger "trx;LogFileName=test-results.trx"
+          --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults
+          retention-days: 14
+
+  build:
+    name: Publish ${{ matrix.rid }}
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: true
+      matrix:
+        rid: [win-x64, win-arm64]
+    env:
+      SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
+      SIGNING_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERT_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Derive version from tag
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = $tag.TrimStart('v')
+          if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') {
+            throw "Tag '$tag' is not a semantic version (expected vMAJOR.MINOR.PATCH[-prerelease])."
+          }
+          $numeric = ($version -split '-')[0]
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "FILE_VERSION=$numeric.${{ github.run_number }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "ASSEMBLY_VERSION=$numeric.0" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Publish single-file executable
+        shell: pwsh
+        run: |
+          dotnet publish $env:PROJECT `
+            --configuration Release `
+            --runtime ${{ matrix.rid }} `
+            --self-contained true `
+            --output "publish/${{ matrix.rid }}" `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:EnableCompressionInSingleFile=true `
+            -p:DebugType=embedded `
+            -p:Version=$env:VERSION `
+            -p:FileVersion=$env:FILE_VERSION `
+            -p:AssemblyVersion=$env:ASSEMBLY_VERSION `
+            -p:ContinuousIntegrationBuild=true `
+            -p:SourceRevisionId=${{ github.sha }}
+          if (-not (Test-Path "publish/${{ matrix.rid }}/LocalMcpServer.exe")) { throw "Publish did not produce LocalMcpServer.exe" }
+
+      - name: Sign executable (optional)
+        if: ${{ env.SIGNING_CERT_BASE64 != '' }}
+        shell: pwsh
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP "signing.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGNING_CERT_BASE64))
+          try {
+            $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+              Where-Object { $_.FullName -match '\\x64\\' } |
+              Sort-Object FullName -Descending |
+              Select-Object -First 1
+            if (-not $signtool) { throw "signtool.exe not found" }
+            & $signtool.FullName sign /f $pfx /p $env:SIGNING_CERT_PASSWORD /fd SHA256 /td SHA256 `
+              /tr http://timestamp.digicert.com /d "Local MCP Server" "publish/${{ matrix.rid }}/LocalMcpServer.exe"
+            if ($LASTEXITCODE -ne 0) { throw "signtool failed with exit code $LASTEXITCODE" }
+          }
+          finally {
+            Remove-Item $pfx -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $name = "LocalMcpServer-$env:VERSION-${{ matrix.rid }}"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item "publish/${{ matrix.rid }}/LocalMcpServer.exe" "dist/$name.exe"
+          $staging = Join-Path $env:RUNNER_TEMP $name
+          New-Item -ItemType Directory -Force -Path $staging | Out-Null
+          Copy-Item "publish/${{ matrix.rid }}/*" $staging -Recurse
+          Copy-Item README.md, LICENSE $staging
+          Compress-Archive -Path "$staging/*" -DestinationPath "dist/$name.zip" -CompressionLevel Optimal
+          Get-ChildItem dist | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.rid }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write        # create the release and upload assets
+      id-token: write        # build provenance attestation
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: dist
+        run: |
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Attest build provenance
+        if: ${{ !github.event.repository.private }}
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/*.exe
+            dist/*.zip
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          flags=(--title "Local MCP Server ${TAG}" --generate-notes --verify-tag)
+          if [[ "${TAG}" == *-* ]]; then
+            flags+=(--prerelease)
+          fi
+
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release ${TAG} exists; replacing assets."
+            gh release upload "${TAG}" dist/* --clobber
+          else
+            gh release create "${TAG}" dist/* "${flags[@]}"
+          fi
